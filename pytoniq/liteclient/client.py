@@ -56,6 +56,7 @@ class LiteClient:
                  host: str,  # ipv4 host
                  port: int,
                  server_pub_key: str,  # server ed25519 public key in base64,
+                 rps_limit: int = 5,
                  timeout: int = 10,
                  tl_schemas_path: typing.Optional[str] = None,
                  trust_level: int = 1,
@@ -64,6 +65,10 @@ class LiteClient:
         """
         ADNL over TCP client for `liteservers` usage
         """
+        self.rps_limit = rps_limit
+        self.requests_in_last_second = 0
+        self.last_reset_time = time.time()
+        self.lock = asyncio.Lock()
 
         """########### init ###########"""
         self.tasks = {}
@@ -125,7 +130,31 @@ class LiteClient:
             await self.close()
             raise
 
+    async def check_rps_limit(self):
+        await self._check_and_reset_rps_limit()
+
+        # Проверяем, если лимит превышен
+        if self.requests_in_last_second > self.rps_limit:
+            print("Reached RPS limit, waiting for 1 second")
+            await asyncio.sleep(1)  # Ждем, не удерживая lock
+            await self._check_and_reset_rps_limit()  # Проверяем лимит еще раз после ожидания
+
+    async def _check_and_reset_rps_limit(self):
+        # Критическая секция, защищенная мьютексом
+        async with self.lock:
+            current_time = time.time()
+
+            # Если прошло больше 1 секунды с момента последнего сброса
+            if current_time - self.last_reset_time >= 1:
+                # Сброс счетчика запросов
+                self.requests_in_last_second = 0
+                self.last_reset_time = current_time
+
+            # Увеличиваем счетчик запросов
+            self.requests_in_last_second += 1
+
     async def send(self, data: bytes, qid: typing.Union[str, int, None]) -> asyncio.Future:
+        await self.check_rps_limit()
         future = self.loop.create_future()
         self.writer.write(data)
         await self._drain()
@@ -133,6 +162,7 @@ class LiteClient:
         return future
 
     async def send_and_encrypt(self, data: bytes, qid: str) -> asyncio.Future:
+        await self.check_rps_limit()
         future = self.loop.create_future()
         self.writer.write(self.encrypt(data))
         await self._drain()
