@@ -445,7 +445,7 @@ class LiteClient:
                         seqno: int, root_hash: typing.Union[str, bytes],
                         file_hash: typing.Union[str, bytes]) -> Block:
         block = self.pack_block_id_ext(wc=wc, shard=shard, seqno=seqno, root_hash=root_hash, file_hash=file_hash)
-        return await self.raw_get_block(BlockIdExt.from_dict(block))
+        return await self.raw_get_block(BlockIdExt.from_dict(block["id"]))
 
     async def raw_get_account_state(self, address: typing.Union[str, Address],
                                     block: typing.Optional[BlockIdExt] = None
